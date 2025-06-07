@@ -1,6 +1,6 @@
 module github.com/supaman4561/ktp-chatbot
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
