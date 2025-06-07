@@ -5,8 +5,8 @@ on:
       - 'v*'
 
 env:
-  PROJECT_NAME: ktp-chatbot
-  IMAGE_NAME: ktp-chatbot
+  PROJECT_NAME: ktp-chan
+  IMAGE_NAME: ktp-chan
 
 jobs:
   build:
