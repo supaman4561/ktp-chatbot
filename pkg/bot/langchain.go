@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/tmc/langchaingo/llms"
@@ -97,12 +96,38 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 
 	log.Printf("Generating response for channel %s with %d total messages", channelID, len(messages))
 
-	// Generate response using LangChain
+	// Convert to MessageContent format
+	var messageContents []llms.MessageContent
+	for _, msg := range messages {
+		var role llms.ChatMessageType
+		switch msg.GetType() {
+		case llms.ChatMessageTypeSystem:
+			role = llms.ChatMessageTypeSystem
+		case llms.ChatMessageTypeHuman:
+			role = llms.ChatMessageTypeHuman
+		case llms.ChatMessageTypeAI:
+			role = llms.ChatMessageTypeAI
+		default:
+			role = llms.ChatMessageTypeHuman
+		}
+		
+		content := llms.MessageContent{
+			Role: role,
+			Parts: []llms.ContentPart{
+				llms.TextPart(msg.GetContent()),
+			},
+		}
+		messageContents = append(messageContents, content)
+	}
+
+	// Generate response using LangChain with structured messages
 	maxTokens := getMaxTokens()
-	response, err := llms.GenerateFromSinglePrompt(ctx, lc.llm, messagesToPrompt(messages), llms.WithMaxTokens(maxTokens))
+	result, err := lc.llm.GenerateContent(ctx, messageContents, llms.WithMaxTokens(maxTokens))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate response: %w", err)
 	}
+
+	response := result.Choices[0].Content
 
 	// Save conversation to history
 	err = history.AddUserMessage(ctx, userMessage)
@@ -151,20 +176,4 @@ func getMaxContextMessages() int {
 	return 20 // Default to 10 conversation pairs
 }
 
-func messagesToPrompt(messages []llms.ChatMessage) string {
-	var parts []string
-
-	for _, message := range messages {
-		switch msg := message.(type) {
-		case llms.SystemChatMessage:
-			parts = append(parts, fmt.Sprintf("System: %s", msg.Content))
-		case llms.HumanChatMessage:
-			parts = append(parts, fmt.Sprintf("Human: %s", msg.Content))
-		case llms.AIChatMessage:
-			parts = append(parts, fmt.Sprintf("AI: %s", msg.Content))
-		}
-	}
-
-	return strings.Join(parts, "\n\n")
-}
 
