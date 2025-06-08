@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -76,6 +77,9 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 	// Use system prompt from environment variable
 	fullPrompt := fmt.Sprintf("%s\n\nチャット内容: %s", c.SystemPrompt, prompt)
+	
+	// Log the full prompt for debugging
+	log.Printf("Full prompt sent to Ollama:\n%s", fullPrompt)
 
 	requestBody := OllamaRequest{
 		Model:  c.Model,
@@ -124,6 +128,9 @@ func (c *OllamaClient) GenerateResponseWithContext(prompt, conversationHistory s
 	} else {
 		fullPrompt = fmt.Sprintf("%s\n\nこのチャットに返信してください: %s", c.SystemPrompt, prompt)
 	}
+	
+	// Log the full prompt for debugging
+	log.Printf("Full prompt with context sent to Ollama:\n%s", fullPrompt)
 
 	requestBody := OllamaRequest{
 		Model:  c.Model,

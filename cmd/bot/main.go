@@ -133,8 +133,27 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if m.Content == "!clear" {
-		log.Printf("Clearing conversation context for channel %s", m.ChannelID)
+		log.Printf("!clear command received from user %s in channel %s", m.Author.Username, m.ChannelID)
+		
+		// Get conversation history before clearing to show what was cleared
+		historyBefore := contextManager.GetConversationHistory(m.ChannelID)
+		if historyBefore != "" {
+			log.Printf("Conversation history before clear:\n%s", historyBefore)
+		} else {
+			log.Printf("No conversation history found for channel %s", m.ChannelID)
+		}
+		
 		contextManager.ClearContext(m.ChannelID)
+		log.Printf("Context cleared for channel %s", m.ChannelID)
+		
+		// Verify that context was actually cleared
+		historyAfter := contextManager.GetConversationHistory(m.ChannelID)
+		if historyAfter == "" {
+			log.Printf("Context successfully cleared for channel %s", m.ChannelID)
+		} else {
+			log.Printf("Warning: Context may not have been cleared properly for channel %s", m.ChannelID)
+		}
+		
 		_, err := s.ChannelMessageSend(m.ChannelID, "会話履歴をクリアしました。")
 		if err != nil {
 			log.Printf("Error sending clear response: %v", err)
