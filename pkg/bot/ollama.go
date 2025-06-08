@@ -12,12 +12,13 @@ import (
 )
 
 type OllamaClient struct {
-	BaseURL     string
-	Model       string
-	client      *http.Client
-	NumPredict  int
-	Temperature float64
-	TopP        float64
+	BaseURL      string
+	Model        string
+	client       *http.Client
+	NumPredict   int
+	Temperature  float64
+	TopP         float64
+	SystemPrompt string
 }
 
 type OllamaRequest struct {
@@ -54,12 +55,18 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 		}
 	}
 
+	systemPrompt := "以下の質問に対して、100単語以内で簡潔に日本語で回答してください。長すぎる回答は避けてください。"
+	if val := os.Getenv("OLLAMA_SYSTEM_PROMPT"); val != "" {
+		systemPrompt = val
+	}
+
 	return &OllamaClient{
-		BaseURL:     baseURL,
-		Model:       model,
-		NumPredict:  numPredict,
-		Temperature: temperature,
-		TopP:        topP,
+		BaseURL:      baseURL,
+		Model:        model,
+		NumPredict:   numPredict,
+		Temperature:  temperature,
+		TopP:         topP,
+		SystemPrompt: systemPrompt,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -67,9 +74,12 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 }
 
 func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
+	// Use system prompt from environment variable
+	fullPrompt := fmt.Sprintf("%s\n\n質問: %s", c.SystemPrompt, prompt)
+	
 	requestBody := OllamaRequest{
 		Model:  c.Model,
-		Prompt: prompt,
+		Prompt: fullPrompt,
 		Stream: false,
 		Options: map[string]interface{}{
 			"num_predict":  c.NumPredict,
