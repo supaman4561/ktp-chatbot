@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -16,6 +17,7 @@ import (
 var (
 	ollamaClient    *bot.OllamaClient
 	allowedChannels map[string]bool
+	contextManager  *bot.ContextManager
 )
 
 func main() {
@@ -42,6 +44,16 @@ func main() {
 
 	ollamaClient = bot.NewOllamaClient(ollamaURL, ollamaModel)
 	log.Printf("Ollama client initialized: %s with model %s", ollamaURL, ollamaModel)
+
+	// Initialize context manager
+	maxMessages := 10
+	if val := os.Getenv("MAX_CONTEXT_MESSAGES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			maxMessages = parsed
+		}
+	}
+	contextManager = bot.NewContextManager(maxMessages)
+	log.Printf("Context manager initialized with max %d messages per channel", maxMessages)
 
 	// Setup allowed channels
 	allowedChannels = make(map[string]bool)
@@ -120,6 +132,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	if m.Content == "!clear" {
+		log.Printf("Clearing conversation context for channel %s", m.ChannelID)
+		contextManager.ClearContext(m.ChannelID)
+		_, err := s.ChannelMessageSend(m.ChannelID, "会話履歴をクリアしました。")
+		if err != nil {
+			log.Printf("Error sending clear response: %v", err)
+		}
+		return
+	}
+
 	if strings.HasPrefix(m.Content, "!") {
 		return
 	}
@@ -127,7 +149,14 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(m.Content) > 0 && ollamaClient != nil {
 		log.Printf("Processing chat message: %s", m.Content)
 
-		response, err := ollamaClient.GenerateResponse(m.Content)
+		// Add user message to context
+		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content)
+
+		// Get conversation history
+		conversationHistory := contextManager.GetConversationHistory(m.ChannelID)
+
+		// Generate response with context
+		response, err := ollamaClient.GenerateResponseWithContext(m.Content, conversationHistory)
 		if err != nil {
 			log.Printf("Error getting Ollama response: %v", err)
 			_, sendErr := s.ChannelMessageSend(m.ChannelID, "申し訳ありませんが、応答の生成中にエラーが発生しました。")
@@ -140,6 +169,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if len(response) > 2000 {
 			response = response[:1997] + "..."
 		}
+
+		// Add bot response to context
+		contextManager.AddMessage(m.ChannelID, "ktp-chan", response)
 
 		_, err = s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {

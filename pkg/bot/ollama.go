@@ -116,3 +116,51 @@ func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 	return ollamaResp.Response, nil
 }
 
+func (c *OllamaClient) GenerateResponseWithContext(prompt, conversationHistory string) (string, error) {
+	// Combine system prompt, conversation history, and current prompt
+	var fullPrompt string
+	if conversationHistory != "" {
+		fullPrompt = fmt.Sprintf("%s\n\n%s\n\n現在のメッセージ: %s", c.SystemPrompt, conversationHistory, prompt)
+	} else {
+		fullPrompt = fmt.Sprintf("%s\n\nチャット内容: %s", c.SystemPrompt, prompt)
+	}
+
+	requestBody := OllamaRequest{
+		Model:  c.Model,
+		Prompt: fullPrompt,
+		Stream: false,
+		Options: map[string]interface{}{
+			"num_predict": c.NumPredict,
+			"temperature": c.Temperature,
+			"top_p":       c.TopP,
+		},
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.client.Post(c.BaseURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama API returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var ollamaResp OllamaResponse
+	if err := json.Unmarshal(body, &ollamaResp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return ollamaResp.Response, nil
+}
+
