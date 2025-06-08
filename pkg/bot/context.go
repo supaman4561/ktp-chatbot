@@ -78,13 +78,13 @@ func (cm *ContextManager) GetConversationHistory(channelID string) string {
 	}
 
 	var history strings.Builder
-	history.WriteString("会話履歴:\n")
-	
+	history.WriteString("## 会話履歴\n")
+
 	for _, msg := range context.Messages {
 		if msg.IsBot {
-			history.WriteString(fmt.Sprintf("【ktp-chan】%s\n\n", msg.Content))
+			history.WriteString(fmt.Sprintf("【ktp-chan】\n%s\n---\n\n", msg.Content))
 		} else {
-			history.WriteString(fmt.Sprintf("【%s】%s\n\n", msg.User, msg.Content))
+			history.WriteString(fmt.Sprintf("【%s】\n%s\n---\n\n", msg.User, msg.Content))
 		}
 	}
 
@@ -101,3 +101,4 @@ func (cm *ContextManager) ClearContext(channelID string) {
 		context.mutex.Unlock()
 	}
 }
+

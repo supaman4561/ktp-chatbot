@@ -77,7 +77,7 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 	// Use system prompt from environment variable
 	fullPrompt := fmt.Sprintf("%s\n\nチャット内容: %s", c.SystemPrompt, prompt)
-	
+
 	// Log the full prompt for debugging
 	log.Printf("Full prompt sent to Ollama:\n%s", fullPrompt)
 
@@ -124,11 +124,11 @@ func (c *OllamaClient) GenerateResponseWithContext(prompt, conversationHistory s
 	// Combine system prompt, conversation history, and current prompt
 	var fullPrompt string
 	if conversationHistory != "" {
-		fullPrompt = fmt.Sprintf("%s\n\n%s【最新メッセージ】%s\n\n上記の会話の流れを踏まえて、最新メッセージに返信してください。", c.SystemPrompt, conversationHistory, prompt)
+		fullPrompt = fmt.Sprintf("%s\n\n%s【最新メッセージ】\n%s\n---\n\n上記の会話の流れを踏まえて、最新メッセージに返信してください。", c.SystemPrompt, conversationHistory, prompt)
 	} else {
-		fullPrompt = fmt.Sprintf("%s\n\n【ユーザー】%s\n\n上記のメッセージに返信してください。", c.SystemPrompt, prompt)
+		fullPrompt = fmt.Sprintf("%s\n\n【ユーザー】\n%s\n---\n\n上記のメッセージに返信してください。", c.SystemPrompt, prompt)
 	}
-	
+
 	// Log the full prompt for debugging
 	log.Printf("Full prompt with context sent to Ollama:\n%s", fullPrompt)
 
