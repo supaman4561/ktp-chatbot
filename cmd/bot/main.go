@@ -134,7 +134,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if m.Content == "!clear" {
 		log.Printf("!clear command received from user %s in channel %s", m.Author.Username, m.ChannelID)
-		
+
 		// Get conversation history before clearing to show what was cleared
 		historyBefore := contextManager.GetConversationHistory(m.ChannelID)
 		if historyBefore != "" {
@@ -142,10 +142,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		} else {
 			log.Printf("No conversation history found for channel %s", m.ChannelID)
 		}
-		
+
 		contextManager.ClearContext(m.ChannelID)
 		log.Printf("Context cleared for channel %s", m.ChannelID)
-		
+
 		// Verify that context was actually cleared
 		historyAfter := contextManager.GetConversationHistory(m.ChannelID)
 		if historyAfter == "" {
@@ -153,7 +153,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		} else {
 			log.Printf("Warning: Context may not have been cleared properly for channel %s", m.ChannelID)
 		}
-		
+
 		_, err := s.ChannelMessageSend(m.ChannelID, "会話履歴をクリアしました。")
 		if err != nil {
 			log.Printf("Error sending clear response: %v", err)
@@ -168,11 +168,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(m.Content) > 0 && ollamaClient != nil {
 		log.Printf("Processing chat message: %s", m.Content)
 
-		// Add user message to context
-		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content, false)
-
 		// Get conversation history
 		conversationHistory := contextManager.GetConversationHistory(m.ChannelID)
+
+		// Add user message to context
+		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content, false)
 
 		// Generate response with context
 		response, err := ollamaClient.GenerateResponseWithContext(m.Content, conversationHistory)
@@ -198,4 +198,3 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 }
-
