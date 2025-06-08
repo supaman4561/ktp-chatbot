@@ -82,9 +82,9 @@ func (cm *ContextManager) GetConversationHistory(channelID string) string {
 	
 	for _, msg := range context.Messages {
 		if msg.IsBot {
-			history.WriteString(fmt.Sprintf("ktp-chan: %s\n", msg.Content))
+			history.WriteString(fmt.Sprintf("【ktp-chan】%s\n\n", msg.Content))
 		} else {
-			history.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Content))
+			history.WriteString(fmt.Sprintf("【%s】%s\n\n", msg.User, msg.Content))
 		}
 	}
 
