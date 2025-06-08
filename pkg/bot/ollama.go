@@ -55,7 +55,7 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 		}
 	}
 
-	systemPrompt := "以下の質問に対して、100単語以内で簡潔に日本語で回答してください。長すぎる回答は避けてください。"
+	systemPrompt := "以下のチャットに対して、100単語以内で簡潔に日本語で返信してください。長すぎる返信は避けてください。"
 	if val := os.Getenv("OLLAMA_SYSTEM_PROMPT"); val != "" {
 		systemPrompt = val
 	}
@@ -75,14 +75,14 @@ func NewOllamaClient(baseURL, model string) *OllamaClient {
 
 func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 	// Use system prompt from environment variable
-	fullPrompt := fmt.Sprintf("%s\n\n質問: %s", c.SystemPrompt, prompt)
-	
+	fullPrompt := fmt.Sprintf("%s\n\nチャット内容: %s", c.SystemPrompt, prompt)
+
 	requestBody := OllamaRequest{
 		Model:  c.Model,
 		Prompt: fullPrompt,
 		Stream: false,
 		Options: map[string]interface{}{
-			"num_predict":  c.NumPredict,
+			"num_predict": c.NumPredict,
 			"temperature": c.Temperature,
 			"top_p":       c.TopP,
 		},
@@ -115,3 +115,4 @@ func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 
 	return ollamaResp.Response, nil
 }
+
