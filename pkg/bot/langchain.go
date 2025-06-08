@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tmc/langchaingo/llms"
@@ -16,7 +17,7 @@ import (
 
 type LangChainBot struct {
 	llm         llms.Model
-	memories    map[string]*memory.ConversationBuffer
+	histories   map[string]schema.ChatMessageHistory
 	memoryMutex sync.RWMutex
 }
 
@@ -44,95 +45,91 @@ func NewLangChainBot() (*LangChainBot, error) {
 	log.Printf("LangChain Ollama client initialized: %s with model %s", baseURL, model)
 
 	return &LangChainBot{
-		llm:      llm,
-		memories: make(map[string]*memory.ConversationBuffer),
+		llm:       llm,
+		histories: make(map[string]schema.ChatMessageHistory),
 	}, nil
 }
 
-func (lc *LangChainBot) getMemory(channelID string) *memory.ConversationBuffer {
+func (lc *LangChainBot) getHistory(channelID string) schema.ChatMessageHistory {
 	lc.memoryMutex.Lock()
 	defer lc.memoryMutex.Unlock()
 
-	if mem, exists := lc.memories[channelID]; exists {
-		return mem
+	if history, exists := lc.histories[channelID]; exists {
+		return history
 	}
 
-	// Create new conversation buffer for this channel
-	maxMessages := 10
-	if val := os.Getenv("MAX_CONTEXT_MESSAGES"); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			maxMessages = parsed
-		}
-	}
-
-	mem := memory.NewConversationBuffer(memory.WithMaxTokenLimit(maxMessages * 200))
-	lc.memories[channelID] = mem
-	log.Printf("Created new memory buffer for channel %s with max %d messages", channelID, maxMessages)
-	return mem
+	// Create new chat message history for this channel
+	history := memory.NewChatMessageHistory()
+	lc.histories[channelID] = history
+	log.Printf("Created new message history for channel %s", channelID)
+	return history
 }
 
 func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMessage string) (string, error) {
-	mem := lc.getMemory(channelID)
+	history := lc.getHistory(channelID)
 
-	// Create system message if specified
+	// Build conversation messages
 	systemPrompt := os.Getenv("OLLAMA_SYSTEM_PROMPT")
 	if systemPrompt == "" {
 		systemPrompt = "100単語以内で簡潔に日本語で返信してください。"
 	}
 
-	// Build messages array with system prompt, history, and user message
-	messages := []schema.ChatMessage{
-		schema.SystemChatMessage{Content: systemPrompt},
+	// Create messages array with system prompt and history
+	messages := []llms.ChatMessage{
+		llms.SystemChatMessage{Content: systemPrompt},
 	}
 
-	// Add conversation history
-	historyMessages, err := mem.ChatHistory.Messages(ctx)
+	// Add history messages with context limit
+	maxMessages := getMaxContextMessages()
+	historyMessages, err := history.Messages(ctx)
 	if err != nil {
-		log.Printf("Error getting conversation history: %v", err)
-	} else {
-		messages = append(messages, historyMessages...)
+		log.Printf("Error getting history messages: %v", err)
+		historyMessages = []llms.ChatMessage{}
 	}
+	if len(historyMessages) > maxMessages {
+		historyMessages = historyMessages[len(historyMessages)-maxMessages:]
+	}
+	messages = append(messages, historyMessages...)
 
 	// Add current user message
-	messages = append(messages, schema.HumanChatMessage{Content: userMessage})
+	userMsg := llms.HumanChatMessage{Content: userMessage}
+	messages = append(messages, userMsg)
 
-	// Log the conversation for debugging
-	log.Printf("Sending %d messages to LLM for channel %s", len(messages), channelID)
-	for i, msg := range messages {
-		log.Printf("Message %d [%s]: %s", i+1, msg.GetType(), msg.GetContent())
-	}
+	log.Printf("Generating response for channel %s with %d total messages", channelID, len(messages))
 
-	// Generate response
-	response, err := lc.llm.GenerateContent(ctx, messages, llms.WithMaxTokens(getMaxTokens()))
+	// Generate response using LangChain
+	maxTokens := getMaxTokens()
+	response, err := llms.GenerateFromSinglePrompt(ctx, lc.llm, messagesToPrompt(messages), llms.WithMaxTokens(maxTokens))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate response: %w", err)
 	}
 
-	responseText := response.Choices[0].Content
-
-	// Add user message and AI response to memory
-	err = mem.ChatHistory.AddUserMessage(ctx, userMessage)
+	// Save conversation to history
+	err = history.AddUserMessage(ctx, userMessage)
 	if err != nil {
-		log.Printf("Error adding user message to memory: %v", err)
+		log.Printf("Error adding user message to history: %v", err)
+	}
+	err = history.AddAIMessage(ctx, response)
+	if err != nil {
+		log.Printf("Error adding AI message to history: %v", err)
 	}
 
-	err = mem.ChatHistory.AddAIMessage(ctx, responseText)
-	if err != nil {
-		log.Printf("Error adding AI message to memory: %v", err)
-	}
-
-	return responseText, nil
+	return response, nil
 }
 
 func (lc *LangChainBot) ClearMemory(channelID string) {
 	lc.memoryMutex.Lock()
 	defer lc.memoryMutex.Unlock()
 
-	if mem, exists := lc.memories[channelID]; exists {
-		mem.Clear(context.Background())
-		log.Printf("Memory cleared for channel %s", channelID)
+	if history, exists := lc.histories[channelID]; exists {
+		err := history.Clear(context.Background())
+		if err != nil {
+			log.Printf("Error clearing history for channel %s: %v", channelID, err)
+		} else {
+			log.Printf("Message history cleared for channel %s", channelID)
+		}
 	} else {
-		log.Printf("No memory found for channel %s", channelID)
+		log.Printf("No message history found for channel %s", channelID)
 	}
 }
 
@@ -143,5 +140,31 @@ func getMaxTokens() int {
 		}
 	}
 	return 100
+}
+
+func getMaxContextMessages() int {
+	if val := os.Getenv("MAX_CONTEXT_MESSAGES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			return parsed * 2 // User + AI message pairs
+		}
+	}
+	return 20 // Default to 10 conversation pairs
+}
+
+func messagesToPrompt(messages []llms.ChatMessage) string {
+	var parts []string
+
+	for _, message := range messages {
+		switch msg := message.(type) {
+		case llms.SystemChatMessage:
+			parts = append(parts, fmt.Sprintf("System: %s", msg.Content))
+		case llms.HumanChatMessage:
+			parts = append(parts, fmt.Sprintf("Human: %s", msg.Content))
+		case llms.AIChatMessage:
+			parts = append(parts, fmt.Sprintf("AI: %s", msg.Content))
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
