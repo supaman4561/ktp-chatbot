@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -15,9 +15,8 @@ import (
 )
 
 var (
-	ollamaClient    *bot.OllamaClient
+	langChainBot    *bot.LangChainBot
 	allowedChannels map[string]bool
-	contextManager  *bot.ContextManager
 )
 
 func main() {
@@ -32,28 +31,11 @@ func main() {
 	}
 	log.Printf("Bot token loaded (length: %d characters)", len(token))
 
-	ollamaURL := os.Getenv("OLLAMA_BASE_URL")
-	if ollamaURL == "" {
-		ollamaURL = "http://localhost:11434"
+	// Initialize LangChain bot
+	langChainBot, err = bot.NewLangChainBot()
+	if err != nil {
+		log.Fatal("Failed to initialize LangChain bot: ", err)
 	}
-
-	ollamaModel := os.Getenv("OLLAMA_MODEL")
-	if ollamaModel == "" {
-		ollamaModel = "llama2"
-	}
-
-	ollamaClient = bot.NewOllamaClient(ollamaURL, ollamaModel)
-	log.Printf("Ollama client initialized: %s with model %s", ollamaURL, ollamaModel)
-
-	// Initialize context manager
-	maxMessages := 10
-	if val := os.Getenv("MAX_CONTEXT_MESSAGES"); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			maxMessages = parsed
-		}
-	}
-	contextManager = bot.NewContextManager(maxMessages)
-	log.Printf("Context manager initialized with max %d messages per channel", maxMessages)
 
 	// Setup allowed channels
 	allowedChannels = make(map[string]bool)
@@ -134,26 +116,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if m.Content == "!clear" {
 		log.Printf("!clear command received from user %s in channel %s", m.Author.Username, m.ChannelID)
-
-		// Get conversation history before clearing to show what was cleared
-		historyBefore := contextManager.GetConversationHistory(m.ChannelID)
-		if historyBefore != "" {
-			log.Printf("Conversation history before clear:\n%s", historyBefore)
-		} else {
-			log.Printf("No conversation history found for channel %s", m.ChannelID)
-		}
-
-		contextManager.ClearContext(m.ChannelID)
-		log.Printf("Context cleared for channel %s", m.ChannelID)
-
-		// Verify that context was actually cleared
-		historyAfter := contextManager.GetConversationHistory(m.ChannelID)
-		if historyAfter == "" {
-			log.Printf("Context successfully cleared for channel %s", m.ChannelID)
-		} else {
-			log.Printf("Warning: Context may not have been cleared properly for channel %s", m.ChannelID)
-		}
-
+		langChainBot.ClearMemory(m.ChannelID)
 		_, err := s.ChannelMessageSend(m.ChannelID, "会話履歴をクリアしました。")
 		if err != nil {
 			log.Printf("Error sending clear response: %v", err)
@@ -165,19 +128,14 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if len(m.Content) > 0 && ollamaClient != nil {
+	if len(m.Content) > 0 && langChainBot != nil {
 		log.Printf("Processing chat message: %s", m.Content)
 
-		// Get conversation history
-		conversationHistory := contextManager.GetConversationHistory(m.ChannelID)
-
-		// Add user message to context
-		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content, false)
-
-		// Generate response with context
-		response, err := ollamaClient.GenerateResponseWithContext(m.Content, conversationHistory)
+		// Generate response using LangChain
+		ctx := context.Background()
+		response, err := langChainBot.GenerateResponse(ctx, m.ChannelID, m.Content)
 		if err != nil {
-			log.Printf("Error getting Ollama response: %v", err)
+			log.Printf("Error getting LangChain response: %v", err)
 			_, sendErr := s.ChannelMessageSend(m.ChannelID, "申し訳ありませんが、応答の生成中にエラーが発生しました。")
 			if sendErr != nil {
 				log.Printf("Error sending error message: %v", sendErr)
@@ -188,9 +146,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if len(response) > 2000 {
 			response = response[:1997] + "..."
 		}
-
-		// Add bot response to context
-		contextManager.AddMessage(m.ChannelID, "ktp-chan", response, true)
 
 		_, err = s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {
