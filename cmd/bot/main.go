@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 var (
-	ollamaClient    *bot.OllamaClient
+	langChainBot    *bot.LangChainBot
 	allowedChannels map[string]bool
 )
 
@@ -30,18 +31,11 @@ func main() {
 	}
 	log.Printf("Bot token loaded (length: %d characters)", len(token))
 
-	ollamaURL := os.Getenv("OLLAMA_BASE_URL")
-	if ollamaURL == "" {
-		ollamaURL = "http://localhost:11434"
+	// Initialize LangChain bot
+	langChainBot, err = bot.NewLangChainBot()
+	if err != nil {
+		log.Fatal("Failed to initialize LangChain bot: ", err)
 	}
-
-	ollamaModel := os.Getenv("OLLAMA_MODEL")
-	if ollamaModel == "" {
-		ollamaModel = "llama2"
-	}
-
-	ollamaClient = bot.NewOllamaClient(ollamaURL, ollamaModel)
-	log.Printf("Ollama client initialized: %s with model %s", ollamaURL, ollamaModel)
 
 	// Setup allowed channels
 	allowedChannels = make(map[string]bool)
@@ -120,16 +114,28 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	if m.Content == "!clear" {
+		log.Printf("!clear command received from user %s in channel %s", m.Author.Username, m.ChannelID)
+		langChainBot.ClearMemory(m.ChannelID)
+		_, err := s.ChannelMessageSend(m.ChannelID, "会話履歴をクリアしました。")
+		if err != nil {
+			log.Printf("Error sending clear response: %v", err)
+		}
+		return
+	}
+
 	if strings.HasPrefix(m.Content, "!") {
 		return
 	}
 
-	if len(m.Content) > 0 && ollamaClient != nil {
+	if len(m.Content) > 0 && langChainBot != nil {
 		log.Printf("Processing chat message: %s", m.Content)
 
-		response, err := ollamaClient.GenerateResponse(m.Content)
+		// Generate response using LangChain
+		ctx := context.Background()
+		response, err := langChainBot.GenerateResponse(ctx, m.ChannelID, m.Content)
 		if err != nil {
-			log.Printf("Error getting Ollama response: %v", err)
+			log.Printf("Error getting LangChain response: %v", err)
 			_, sendErr := s.ChannelMessageSend(m.ChannelID, "申し訳ありませんが、応答の生成中にエラーが発生しました。")
 			if sendErr != nil {
 				log.Printf("Error sending error message: %v", sendErr)
@@ -147,4 +153,3 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 }
-
