@@ -150,7 +150,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		log.Printf("Processing chat message: %s", m.Content)
 
 		// Add user message to context
-		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content)
+		contextManager.AddMessage(m.ChannelID, m.Author.Username, m.Content, false)
 
 		// Get conversation history
 		conversationHistory := contextManager.GetConversationHistory(m.ChannelID)
@@ -171,7 +171,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		// Add bot response to context
-		contextManager.AddMessage(m.ChannelID, "ktp-chan", response)
+		contextManager.AddMessage(m.ChannelID, "ktp-chan", response, true)
 
 		_, err = s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {

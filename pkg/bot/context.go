@@ -10,6 +10,7 @@ import (
 type Message struct {
 	User      string
 	Content   string
+	IsBot     bool
 	Timestamp time.Time
 }
 
@@ -31,7 +32,7 @@ func NewContextManager(maxMessages int) *ContextManager {
 	}
 }
 
-func (cm *ContextManager) AddMessage(channelID, username, content string) {
+func (cm *ContextManager) AddMessage(channelID, username, content string, isBot bool) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -48,6 +49,7 @@ func (cm *ContextManager) AddMessage(channelID, username, content string) {
 	message := Message{
 		User:      username,
 		Content:   content,
+		IsBot:     isBot,
 		Timestamp: time.Now(),
 	}
 
@@ -79,7 +81,11 @@ func (cm *ContextManager) GetConversationHistory(channelID string) string {
 	history.WriteString("会話履歴:\n")
 	
 	for _, msg := range context.Messages {
-		history.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Content))
+		if msg.IsBot {
+			history.WriteString(fmt.Sprintf("ktp-chan: %s\n", msg.Content))
+		} else {
+			history.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Content))
+		}
 	}
 
 	return history.String()

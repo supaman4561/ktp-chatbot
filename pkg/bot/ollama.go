@@ -120,9 +120,9 @@ func (c *OllamaClient) GenerateResponseWithContext(prompt, conversationHistory s
 	// Combine system prompt, conversation history, and current prompt
 	var fullPrompt string
 	if conversationHistory != "" {
-		fullPrompt = fmt.Sprintf("%s\n\n%s\n\n現在のメッセージ: %s", c.SystemPrompt, conversationHistory, prompt)
+		fullPrompt = fmt.Sprintf("%s\n\n%s\n\nこのチャットに返信してください: %s", c.SystemPrompt, conversationHistory, prompt)
 	} else {
-		fullPrompt = fmt.Sprintf("%s\n\nチャット内容: %s", c.SystemPrompt, prompt)
+		fullPrompt = fmt.Sprintf("%s\n\nこのチャットに返信してください: %s", c.SystemPrompt, prompt)
 	}
 
 	requestBody := OllamaRequest{
@@ -163,4 +163,3 @@ func (c *OllamaClient) GenerateResponseWithContext(prompt, conversationHistory s
 
 	return ollamaResp.Response, nil
 }
-
