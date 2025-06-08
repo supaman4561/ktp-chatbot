@@ -6,19 +6,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
 type OllamaClient struct {
-	BaseURL string
-	Model   string
-	client  *http.Client
+	BaseURL     string
+	Model       string
+	client      *http.Client
+	NumPredict  int
+	Temperature float64
+	TopP        float64
 }
 
 type OllamaRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model   string                 `json:"model"`
+	Prompt  string                 `json:"prompt"`
+	Stream  bool                   `json:"stream"`
+	Options map[string]interface{} `json:"options,omitempty"`
 }
 
 type OllamaResponse struct {
@@ -27,9 +33,33 @@ type OllamaResponse struct {
 }
 
 func NewOllamaClient(baseURL, model string) *OllamaClient {
+	numPredict := 100
+	if val := os.Getenv("OLLAMA_NUM_PREDICT"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			numPredict = parsed
+		}
+	}
+
+	temperature := 0.7
+	if val := os.Getenv("OLLAMA_TEMPERATURE"); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			temperature = parsed
+		}
+	}
+
+	topP := 0.9
+	if val := os.Getenv("OLLAMA_TOP_P"); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			topP = parsed
+		}
+	}
+
 	return &OllamaClient{
-		BaseURL: baseURL,
-		Model:   model,
+		BaseURL:     baseURL,
+		Model:       model,
+		NumPredict:  numPredict,
+		Temperature: temperature,
+		TopP:        topP,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -41,6 +71,11 @@ func (c *OllamaClient) GenerateResponse(prompt string) (string, error) {
 		Model:  c.Model,
 		Prompt: prompt,
 		Stream: false,
+		Options: map[string]interface{}{
+			"num_predict":  c.NumPredict,
+			"temperature": c.Temperature,
+			"top_p":       c.TopP,
+		},
 	}
 
 	jsonData, err := json.Marshal(requestBody)
