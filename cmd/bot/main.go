@@ -124,6 +124,60 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	if m.Content == "!model" {
+		currentModel := langChainBot.GetChannelModel(m.ChannelID)
+		availableModels := bot.GetAvailableModels()
+
+		message := "利用可能なモデル:\n"
+		for _, model := range availableModels {
+			message += "• " + model + "\n"
+		}
+		message += "\n現在のモデル: " + currentModel + "\n\n使用方法: !model <モデル名>"
+
+		_, err := s.ChannelMessageSend(m.ChannelID, message)
+		if err != nil {
+			log.Printf("Error sending model list response: %v", err)
+		}
+		return
+	}
+
+	if strings.HasPrefix(m.Content, "!model ") {
+		modelName := strings.TrimSpace(strings.TrimPrefix(m.Content, "!model "))
+		if modelName == "" {
+			_, err := s.ChannelMessageSend(m.ChannelID, "使用方法: !model <モデル名>")
+			if err != nil {
+				log.Printf("Error sending model usage response: %v", err)
+			}
+			return
+		}
+
+		if !bot.IsModelAvailable(modelName) {
+			_, err := s.ChannelMessageSend(m.ChannelID, "指定されたモデルは利用できません。!model で利用可能なモデル一覧を確認してください。")
+			if err != nil {
+				log.Printf("Error sending model not allowed response: %v", err)
+			}
+			return
+		}
+
+		log.Printf("!model command received from user %s in channel %s: %s", m.Author.Username, m.ChannelID, modelName)
+
+		err := langChainBot.SetChannelModel(m.ChannelID, modelName)
+		if err != nil {
+			log.Printf("Error setting model for channel %s: %v", m.ChannelID, err)
+			_, sendErr := s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("モデル '%s' の設定に失敗しました: %v", modelName, err))
+			if sendErr != nil {
+				log.Printf("Error sending model error response: %v", sendErr)
+			}
+			return
+		}
+
+		_, err = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("このチャンネルのモデルを '%s' に設定しました。", modelName))
+		if err != nil {
+			log.Printf("Error sending model success response: %v", err)
+		}
+		return
+	}
+
 	if strings.HasPrefix(m.Content, "!") {
 		return
 	}
@@ -141,10 +195,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				log.Printf("Error sending error message: %v", sendErr)
 			}
 			return
-		}
-
-		if len(response) > 2000 {
-			response = response[:1997] + "..."
 		}
 
 		_, err = s.ChannelMessageSend(m.ChannelID, response)

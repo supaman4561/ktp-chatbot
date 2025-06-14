@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/supaman4561/ktp-chatbot/pkg/config"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/ollama"
 	"github.com/tmc/langchaingo/memory"
@@ -17,22 +16,16 @@ import (
 )
 
 type LangChainBot struct {
-	llm         llms.Model
-	histories   map[string]schema.ChatMessageHistory
-	memoryMutex sync.RWMutex
+	llm           llms.Model
+	histories     map[string]schema.ChatMessageHistory
+	channelModels map[string]string // channelID -> model name
+	memoryMutex   sync.RWMutex
 }
 
 func NewLangChainBot() (*LangChainBot, error) {
-	// Get Ollama configuration
-	baseURL := os.Getenv("OLLAMA_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:11434"
-	}
-
-	model := os.Getenv("OLLAMA_MODEL")
-	if model == "" {
-		model = "llama2"
-	}
+	// Get Ollama configuration from config package
+	baseURL := config.GetOllamaBaseURL()
+	model := config.GetDefaultModel()
 
 	// Initialize Ollama LLM with LangChain
 	llm, err := ollama.New(
@@ -46,8 +39,9 @@ func NewLangChainBot() (*LangChainBot, error) {
 	log.Printf("LangChain Ollama client initialized: %s with model %s", baseURL, model)
 
 	return &LangChainBot{
-		llm:       llm,
-		histories: make(map[string]schema.ChatMessageHistory),
+		llm:           llm,
+		histories:     make(map[string]schema.ChatMessageHistory),
+		channelModels: make(map[string]string),
 	}, nil
 }
 
@@ -69,8 +63,22 @@ func (lc *LangChainBot) getHistory(channelID string) schema.ChatMessageHistory {
 func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMessage string) (string, error) {
 	history := lc.getHistory(channelID)
 
+	// Get channel-specific model
+	channelModel := lc.GetChannelModel(channelID)
+
+	// Create LLM instance for this channel
+	baseURL := config.GetOllamaBaseURL()
+
+	channelLLM, err := ollama.New(
+		ollama.WithServerURL(baseURL),
+		ollama.WithModel(channelModel),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize LLM for channel %s with model %s: %w", channelID, channelModel, err)
+	}
+
 	// Build conversation messages
-	systemPrompt := os.Getenv("OLLAMA_SYSTEM_PROMPT")
+	systemPrompt := config.GetSystemPrompt()
 
 	// Create messages array with system prompt and history
 	messages := []llms.ChatMessage{
@@ -78,7 +86,7 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 	}
 
 	// Add history messages with context limit
-	maxMessages := getMaxContextMessages()
+	maxMessages := config.GetMaxContextMessages()
 	historyMessages, err := history.Messages(ctx)
 	if err != nil {
 		log.Printf("Error getting history messages: %v", err)
@@ -93,7 +101,7 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 	userMsg := llms.HumanChatMessage{Content: userMessage}
 	messages = append(messages, userMsg)
 
-	log.Printf("Generating response for channel %s with %d total messages", channelID, len(messages))
+	log.Printf("Generating response for channel %s with model %s and %d total messages", channelID, channelModel, len(messages))
 
 	// Convert to MessageContent format
 	var messageContents []llms.MessageContent
@@ -119,9 +127,9 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 		messageContents = append(messageContents, content)
 	}
 
-	// Generate response using LangChain with structured messages
-	maxTokens := getMaxTokens()
-	result, err := lc.llm.GenerateContent(ctx, messageContents, llms.WithMaxTokens(maxTokens))
+	// Generate response using channel-specific LLM
+	maxTokens := config.GetMaxTokens()
+	result, err := channelLLM.GenerateContent(ctx, messageContents, llms.WithMaxTokens(maxTokens))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate response: %w", err)
 	}
@@ -129,7 +137,7 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 	response := result.Choices[0].Content
 
 	// Remove DeepSeek thinking tags if using deepseek-r1 model
-	if strings.Contains(strings.ToLower(os.Getenv("OLLAMA_MODEL")), "deepseek-r1") {
+	if strings.Contains(strings.ToLower(channelModel), "deepseek-r1") {
 		response = cleanDeepSeekResponse(response)
 	}
 
@@ -162,35 +170,49 @@ func (lc *LangChainBot) ClearMemory(channelID string) {
 	}
 }
 
-func getMaxTokens() int {
-	if val := os.Getenv("OLLAMA_NUM_PREDICT"); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			return parsed
-		}
+func (lc *LangChainBot) SetChannelModel(channelID, modelName string) error {
+	lc.memoryMutex.Lock()
+	defer lc.memoryMutex.Unlock()
+
+	// Create new LLM with the specified model
+	baseURL := config.GetOllamaBaseURL()
+
+	_, err := ollama.New(
+		ollama.WithServerURL(baseURL),
+		ollama.WithModel(modelName),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to validate model %s: %w", modelName, err)
 	}
-	return 100
+
+	lc.channelModels[channelID] = modelName
+	log.Printf("Model for channel %s set to %s", channelID, modelName)
+	return nil
 }
 
-func getMaxContextMessages() int {
-	if val := os.Getenv("MAX_CONTEXT_MESSAGES"); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			return parsed * 2 // User + AI message pairs
-		}
+func (lc *LangChainBot) GetChannelModel(channelID string) string {
+	lc.memoryMutex.RLock()
+	defer lc.memoryMutex.RUnlock()
+
+	if model, exists := lc.channelModels[channelID]; exists {
+		return model
 	}
-	return 20 // Default to 10 conversation pairs
+
+	// Return default model if not set
+	return config.GetDefaultModel()
 }
 
 func cleanDeepSeekResponse(response string) string {
 	// Remove <think>...</think> tags and their content
 	thinkRegex := regexp.MustCompile(`(?s)<think>.*?</think>`)
 	cleaned := thinkRegex.ReplaceAllString(response, "")
-	
+
 	// Remove extra whitespace and newlines
 	cleaned = strings.TrimSpace(cleaned)
-	
+
 	// Remove multiple consecutive newlines
 	multiNewlineRegex := regexp.MustCompile(`\n\s*\n\s*\n`)
 	cleaned = multiNewlineRegex.ReplaceAllString(cleaned, "\n\n")
-	
+
 	return cleaned
 }
