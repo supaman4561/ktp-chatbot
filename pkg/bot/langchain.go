@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tmc/langchaingo/llms"
@@ -69,9 +71,6 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 
 	// Build conversation messages
 	systemPrompt := os.Getenv("OLLAMA_SYSTEM_PROMPT")
-	if systemPrompt == "" {
-		systemPrompt = "100単語以内で簡潔に日本語で返信してください。"
-	}
 
 	// Create messages array with system prompt and history
 	messages := []llms.ChatMessage{
@@ -110,7 +109,7 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 		default:
 			role = llms.ChatMessageTypeHuman
 		}
-		
+
 		content := llms.MessageContent{
 			Role: role,
 			Parts: []llms.ContentPart{
@@ -128,6 +127,11 @@ func (lc *LangChainBot) GenerateResponse(ctx context.Context, channelID, userMes
 	}
 
 	response := result.Choices[0].Content
+
+	// Remove DeepSeek thinking tags if using deepseek-r1 model
+	if strings.Contains(strings.ToLower(os.Getenv("OLLAMA_MODEL")), "deepseek-r1") {
+		response = cleanDeepSeekResponse(response)
+	}
 
 	// Save conversation to history
 	err = history.AddUserMessage(ctx, userMessage)
@@ -176,4 +180,17 @@ func getMaxContextMessages() int {
 	return 20 // Default to 10 conversation pairs
 }
 
-
+func cleanDeepSeekResponse(response string) string {
+	// Remove <think>...</think> tags and their content
+	thinkRegex := regexp.MustCompile(`(?s)<think>.*?</think>`)
+	cleaned := thinkRegex.ReplaceAllString(response, "")
+	
+	// Remove extra whitespace and newlines
+	cleaned = strings.TrimSpace(cleaned)
+	
+	// Remove multiple consecutive newlines
+	multiNewlineRegex := regexp.MustCompile(`\n\s*\n\s*\n`)
+	cleaned = multiNewlineRegex.ReplaceAllString(cleaned, "\n\n")
+	
+	return cleaned
+}
