@@ -1,9 +1,13 @@
 package config
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // GetOllamaBaseURL returns the Ollama base URL
@@ -29,8 +33,30 @@ func GetDefaultAvailableModels() []string {
 	return []string{"gemma3:4b", "deepseek-r1:8b"}
 }
 
+// OllamaModel represents a model from the Ollama API
+type OllamaModel struct {
+	Name       string            `json:"name"`
+	Model      string            `json:"model"`
+	ModifiedAt string            `json:"modified_at"`
+	Size       int64             `json:"size"`
+	Digest     string            `json:"digest"`
+	Details    map[string]interface{} `json:"details"`
+}
+
+// OllamaTagsResponse represents the response from /api/tags endpoint
+type OllamaTagsResponse struct {
+	Models []OllamaModel `json:"models"`
+}
+
 // GetAvailableModels returns the list of available Ollama models
+// First tries to fetch from Ollama API, falls back to environment variable or defaults
 func GetAvailableModels() []string {
+	// Try to get models from Ollama API first
+	if apiModels := getModelsFromOllamaAPI(); len(apiModels) > 0 {
+		return apiModels
+	}
+
+	// Fallback to environment variable
 	modelsEnv := os.Getenv("OLLAMA_AVAILABLE_MODELS")
 	if modelsEnv == "" {
 		return GetDefaultAvailableModels()
@@ -45,6 +71,43 @@ func GetAvailableModels() []string {
 		}
 	}
 	return cleanModels
+}
+
+// getModelsFromOllamaAPI fetches available models from Ollama API
+func getModelsFromOllamaAPI() []string {
+	baseURL := GetOllamaBaseURL()
+	url := baseURL + "/api/tags"
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var tagsResponse OllamaTagsResponse
+	if err := json.Unmarshal(body, &tagsResponse); err != nil {
+		return nil
+	}
+
+	var modelNames []string
+	for _, model := range tagsResponse.Models {
+		modelNames = append(modelNames, model.Name)
+	}
+
+	return modelNames
 }
 
 // GetSystemPrompt returns the system prompt for the LLM
